@@ -2,9 +2,8 @@
 
 import { useState, useRef, useEffect } from "react"
 import MicButton from "./mic-button"
-import VoiceWave from "./voice-wave"
 import CloseButton from "./close-button"
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 
 export default function VoiceRecorder() {
   const [isRecording, setIsRecording] = useState(false)
@@ -22,8 +21,14 @@ export default function VoiceRecorder() {
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       mediaStreamRef.current = stream
-      console.log("stream audio", stream)
-
+      
+      console.log("Stream tracks:", stream.getTracks());
+      navigator.mediaDevices.enumerateDevices().then(devices => {
+        devices.forEach(device => {
+          console.log(device.kind + ": " + device.label + " id = " + device.deviceId);
+        });
+      });
+      
       // Create audio context
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
       audioContextRef.current = audioContext
@@ -67,7 +72,7 @@ export default function VoiceRecorder() {
     if (!analyserRef.current) return
 
     const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount)
-    console.log("data array", dataArray) 
+    console.log("dataArray contents", Array.from(dataArray));
 
     const updateLevel = () => {
       if (!isRecording || !analyserRef.current) return
@@ -85,7 +90,7 @@ export default function VoiceRecorder() {
       // Normalize to 0-1 range
       const normalizedLevel = Math.min(average / 128, 1)
       setAudioLevel(normalizedLevel)
-      setScale(1 + audioLevel * 0.5)
+      setScale(1 + normalizedLevel * 0.5)
       console.log("normalized audio level", audioLevel)
       console.log("scale", scale)
 
@@ -108,44 +113,45 @@ export default function VoiceRecorder() {
     };
   }, []);
 
+  useEffect(() => {
+    if (isRecording) {
+      console.log("scale", scale)
+    }
+  }, [scale])
+
   return (
     <div className="flex flex-col items-center justify-center w-full h-full">
-      {/* Voice wave visualization */}
-      <div className="mb-16">
-        <VoiceWave audioLevel={audioLevel} isRecording={isRecording} />
-      </div>
-
       {/* Controls */}
       <div className="absolute bottom-10 w-full flex flex-col items-center">
         {/* Recording controls */}
+        <AnimatePresence>
+          {isRecording && (
+            <motion.div
+              key="voiceIcon"
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ type: "spring", stiffness: 300, damping: 20 }}
+              style={{
+                width: 100,
+                height: 100,
+                borderRadius: "50%",
+                backgroundColor: "#6200EE",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                margin: "20px 0",
+              }}
+            >
+              <span style={{ color: "white", fontSize: "2rem" }}>🎤</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
         <div className="flex items-center justify-center gap-16 mb-6">
           {isRecording && <CloseButton onClick={stopRecording} />}
           <MicButton isRecording={isRecording} onClick={isRecording ? stopRecording : startRecording} />
 
         </div>
-
-    {/* 
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <motion.div
-            animate={{ scale }}
-            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-            style={{
-            width: 100,
-            height: 100,
-            borderRadius: '50%',
-            backgroundColor: '#6200EE',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 20,
-            }}
-        >
-            
-            <span style={{ color: 'white', fontSize: '2rem' }}>🎤</span>
-        </motion.div>
-        </div>
-         */}
-         
       </div>
     </div>
   )
