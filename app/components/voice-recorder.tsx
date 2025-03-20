@@ -28,10 +28,13 @@ export default function VoiceRecorder() {
           console.log(device.kind + ": " + device.label + " id = " + device.deviceId);
         });
       });
-      
+
       // Create audio context
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
       audioContextRef.current = audioContext
+      if (audioContextRef.current?.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
       console.log("audio context", audioContext)
 
       // Create analyser node
