@@ -41,6 +41,7 @@ export default function VoiceRecorder() {
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
       analyserRef.current = analyser;
+
       console.log("analyser", analyser);
 
       // Initialize the data array once, and store it in the ref
@@ -74,39 +75,64 @@ export default function VoiceRecorder() {
 
   // Analyze audio to get volume level using the cached dataArrayRef
   const analyzeAudio = () => {
-    if (!analyserRef.current 
-      // || !dataArrayRef.current
-    ) return;
+    if (!analyserRef.current || !dataArrayRef.current) return;
 
     const updateLevel = () => {
-      if (!isRecording || !analyserRef.current 
-        || !dataArrayRef.current
-      ){console.log("entered the exit"); return;};
+      if (!isRecording || !analyserRef.current || !dataArrayRef.current) {
+        console.log("Exiting audio analysis loop.");
+        return;
+      }
 
       // Reuse the data array from the ref
       const dataArray = dataArrayRef.current;
       analyserRef.current.getByteFrequencyData(dataArray);
       console.log("Data array:", dataArray);
       
-      // Calculate average volume
-      let sum = 0;s
-      for (let i = 0; i < dataArray.length; i++) {
-        sum += dataArray[i];
-      }
-      const average = sum / dataArray.length;
+      // // Calculate average volume
+      // let sum = 0;
+      // for (let i = 0; i < dataArray.length; i++) {
+      //   sum += dataArray[i];
+      // }
+      // const average = sum / dataArray.length;
 
-      // Normalize to 0-1 range
-      const normalizedLevel = Math.min(average / 128, 1);
-      setScale(1 + normalizedLevel * 0.5);
+      // // Normalize to 0-1 range
+      // const normalizedLevel = Math.min(average / 128, 1);
+      // setScale(1 + normalizedLevel * 0.5);
 
-      console.log("Computed average:", average, "Normalized audio level:", normalizedLevel);
+      // console.log("Computed average:", average, "Normalized audio level:", normalizedLevel);
 
-      // Continue analyzing on next frame
       requestAnimationFrame(updateLevel);
     };
 
     updateLevel();
   };
+
+  useEffect(() => {
+    let animationFrameId: number;
+  
+    const updateAudioLevel = () => {
+      if (analyserRef.current && dataArrayRef.current) {
+        analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+        
+        let sum = 0;
+        for (let i = 0; i < dataArrayRef.current.length; i++) {
+          sum += dataArrayRef.current[i];
+        }
+        const average = sum / dataArrayRef.current.length;
+        // Normalize to 0-1 range
+        const normalizedLevel = Math.min(average / 128, 1);
+        setScale(1 + normalizedLevel * 0.5);
+      }
+      animationFrameId = requestAnimationFrame(updateAudioLevel);
+    };
+  
+    if (isRecording) {
+      animationFrameId = requestAnimationFrame(updateAudioLevel);
+    }
+  
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [isRecording]);
+  
 
   // Clean up on unmount
   useEffect(() => {
