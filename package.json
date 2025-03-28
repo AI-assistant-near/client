@@ -9,13 +9,18 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@web3icons/react": "^4.0.10",
+    "formidable": "^3.5.2",
     "framer-motion": "^12.5.0",
+    "lucide": "^0.484.0",
+    "lucide-react": "^0.484.0",
     "next": "15.2.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/formidable": "^3.4.5",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

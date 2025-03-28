@@ -4,36 +4,50 @@ import { useState, useRef, useEffect } from "react";
 import MicButton from "./mic-button";
 import CloseButton from "./close-button";
 import { AnimatePresence, motion } from "framer-motion";
-
+import WelcomeStep from "../welcome-step/page";
+import Onboarding from "../onboarding/page";
+import AgentAction from "../agent-action/page";
 export default function VoiceRecorder() {
+  const [step, setStep] = useState<0 | 1 | 2>(0);
+
+  const goToNextStep = () => {
+    setStep((prev) => (prev + 1) as 0 | 1 | 2);
+  };
+
+  const goToStep = (newStep: 0 | 1 | 2) => {
+    setStep(newStep);
+  };
+
+  const goToPreviousStep = () => {
+    setStep((prev) => (prev - 1) as  1 | 2);
+  };
+
   const [isRecording, setIsRecording] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
   const [scale, setScale] = useState(1);
 
+  // Audio graph references
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  // Declare the data array ref at the top so it's available everywhere in the component
   const dataArrayRef = useRef<Uint8Array | null>(null);
 
-  // Start recording
-  const startRecording = async () => {
+  // MediaRecorder references
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+
+  // Initialize the audio graph on user activation
+  const initializeAudio = async () => {
     try {
-      // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
-
       console.log("Stream tracks:", stream.getTracks());
-      navigator.mediaDevices.enumerateDevices().then((devices) => {
-        devices.forEach((device) => {
-          console.log(device.kind + ": " + device.label + " id = " + device.deviceId);
-        });
-      });
 
-      // Create audio context
+      // Create AudioContext
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       audioContextRef.current = audioContext;
-      if (audioContextRef.current?.state === "suspended") {
-        await audioContextRef.current.resume();
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
       }
       console.log("audio context", audioContext);
 
@@ -41,11 +55,10 @@ export default function VoiceRecorder() {
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
       analyserRef.current = analyser;
-
       console.log("analyser", analyser);
 
-      // Initialize the data array once, and store it in the ref
-      if (analyserRef.current && !dataArrayRef.current) {
+      // Initialize data array
+      if (analyserRef.current) {
         dataArrayRef.current = new Uint8Array(analyserRef.current.frequencyBinCount);
         console.log("Initialized dataArray:", dataArrayRef.current);
       }
@@ -55,21 +68,71 @@ export default function VoiceRecorder() {
       source.connect(analyser);
       console.log("source", source);
 
-      // Start recording and audio analysis
+      // Mark as initialized so we don't reinitialize on every record
+      setIsInitialized(true);
+    } catch (error) {
+      console.error("Error during audio initialization:", error);
+    }
+  };
+
+  // Start recording: assumes initialization has already occurred.
+  const startRecording = () => {
+    if (!mediaStreamRef.current) {
+      console.error("Media stream not initialized. Please activate your microphone first.");
+      return;
+    }
+
+    // Set up MediaRecorder
+    if (typeof MediaRecorder !== "undefined") {
+      const recorder = new MediaRecorder(mediaStreamRef.current, { mimeType: "audio/webm" });
+      mediaRecorderRef.current = recorder;
+      recordedChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recordedChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const blob = new Blob(recordedChunksRef.current, { type: "audio/webm" });
+        console.log("Recording finished, blob size:", blob.size);
+        const formData = new FormData();
+        formData.append("file", blob, "recording.webm");
+        console.log(formData)
+        try {
+          const response = await fetch("/api/agent", {
+            method: "POST",
+            body: formData,
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          console.log("Audio uploaded successfully.");
+        } catch (err) {
+          console.error("Error uploading audio:", err);
+        }
+        recordedChunksRef.current = [];
+      };
+
+      recorder.start();
+      console.log("MediaRecorder started", recorder.state);
       setIsRecording(true);
       analyzeAudio();
-    } catch (error) {
-      console.error("Error accessing microphone:", error);
+    } else {
+      console.error("MediaRecorder is not supported in this browser.");
     }
   };
 
   // Stop recording
   const stopRecording = () => {
-    // Stop the media stream
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
     }
-    // Reset state
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+      console.log("MediaRecorder stopped");
+    }
     setIsRecording(false);
   };
 
@@ -82,24 +145,9 @@ export default function VoiceRecorder() {
         console.log("Exiting audio analysis loop.");
         return;
       }
-
-      // Reuse the data array from the ref
       const dataArray = dataArrayRef.current;
       analyserRef.current.getByteFrequencyData(dataArray);
       console.log("Data array:", dataArray);
-      
-      // // Calculate average volume
-      // let sum = 0;
-      // for (let i = 0; i < dataArray.length; i++) {
-      //   sum += dataArray[i];
-      // }
-      // const average = sum / dataArray.length;
-
-      // // Normalize to 0-1 range
-      // const normalizedLevel = Math.min(average / 128, 1);
-      // setScale(1 + normalizedLevel * 0.5);
-
-      // console.log("Computed average:", average, "Normalized audio level:", normalizedLevel);
 
       requestAnimationFrame(updateLevel);
     };
@@ -107,6 +155,7 @@ export default function VoiceRecorder() {
     updateLevel();
   };
 
+  // Use requestAnimationFrame to update the scale value based on audio volume
   useEffect(() => {
     let animationFrameId: number;
   
@@ -119,9 +168,8 @@ export default function VoiceRecorder() {
           sum += dataArrayRef.current[i];
         }
         const average = sum / dataArrayRef.current.length;
-        // Normalize to 0-1 range
         const normalizedLevel = Math.min(average / 128, 1);
-        setScale(1 + normalizedLevel * 0.5);
+        setScale(1 + normalizedLevel * 0.7);
       }
       animationFrameId = requestAnimationFrame(updateAudioLevel);
     };
@@ -133,7 +181,6 @@ export default function VoiceRecorder() {
     return () => cancelAnimationFrame(animationFrameId);
   }, [isRecording]);
   
-
   // Clean up on unmount
   useEffect(() => {
     return () => {
@@ -153,38 +200,76 @@ export default function VoiceRecorder() {
   }, [scale]);
 
   return (
-    <div className="flex flex-col items-center justify-center w-full h-full">
-      {/* Controls */}
-      <div className="absolute bottom-10 w-full flex flex-col items-center">
-        {/* Recording controls */}
-        <AnimatePresence>
-          {isRecording && (
-            <motion.div
-              key="voiceIcon"
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              transition={{ type: "spring", stiffness: 300, damping: 20 }}
-              style={{
-                width: 100,
-                height: 100,
-                borderRadius: "50%",
-                backgroundColor: "#6200EE",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                margin: "20px 0",
-              }}
-            >
-              <span style={{ color: "white", fontSize: "2rem" }}>🎤</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <div className="flex items-center justify-center gap-16 mb-6">
-          {isRecording && <CloseButton onClick={stopRecording} />}
-          <MicButton isRecording={isRecording} onClick={isRecording ? stopRecording : startRecording} />
-        </div>
+    <div className= "max-w-[30rem] w-full flex flex-col items-center justify-center bg-black text-white"
+    >
+      <div 
+      style={{ padding: "2rem" }}
+      >
+        {step === 0 && <WelcomeStep onNext={goToNextStep} /* ...other props */ />}
+        {step === 1 && <Onboarding onNext={goToNextStep} /* ...other props */ />}
+        {step === 2 && <AgentAction /* no onNext if final? */ />}
+    
+        {/* Show the 'Go Back' button if step > 0 */}
+        {step > 0 && (
+          <button className="rounded-full" onClick={goToPreviousStep}>
+            Back
+          </button>
+        )}
       </div>
     </div>
   );
+
+  // return (
+  //   <div className="flex flex-col items-center justify-center w-full h-full">
+  //     <div className="absolute bottom-10 w-full flex flex-col items-center">
+  //     <AnimatePresence>
+  //         {isRecording && (
+  //           <motion.div
+  //             key="voiceIcon"
+  //             initial={{ opacity: 0, scale: 0.8 }}
+  //             animate={{ opacity: 1, scale }}
+  //             exit={{ opacity: 0, scale: 0.8 }}
+  //             transition={{
+  //               type: "spring",
+  //               stiffness: 100,
+  //               damping: 15,
+  //               duration: 1.5,
+  //             }}
+  //             style={{
+  //               width: 100,
+  //               height: 100,
+  //               borderRadius: "50%",
+  //               backgroundColor: "#6200EE",
+  //               display: "flex",
+  //               alignItems: "center",
+  //               justifyContent: "center",
+  //               margin: "20px 0",
+  //             }}
+  //           >
+  //             <span style={{ color: "white", fontSize: "2rem" }}>🎤</span>
+  //           </motion.div>
+  //         )}
+  //       </AnimatePresence>
+  //       {/* If not initialized, prompt user to activate microphone */}
+  //       {!isInitialized ? (
+  //         <button
+  //           className="px-4 py-2 bg-blue-600 text-white rounded-md mb-4"
+  //           onClick={initializeAudio}
+  //         >
+  //           Activate Microphone
+  //         </button>
+  //       ) : (
+  //         <div className="flex items-center justify-center gap-16 mb-6">
+  //           {isRecording && <CloseButton onClick={stopRecording} />}
+  //           <MicButton
+  //             isRecording={isRecording}
+  //             onClick={() => {
+  //               isRecording ? stopRecording() : startRecording();
+  //             }}
+  //           />
+  //         </div>
+  //       )}
+  //     </div>
+  //   </div>
+  // );
 }
